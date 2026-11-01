@@ -82,5 +82,42 @@ export function createTools(sessions: Sessions): Record<string, ToolDefinition> 
       await permission(context, "getPreviewURL", String(args.port));
       return sessions.run(context.sessionID, async (sandbox) => sandbox.domain(args.port), context.abort);
     } }),
+    sandboxStatus: tool({ description: "Report the current Vercel Sandbox status, configuration and usage for this session. Does not start or stop compute.", args: {}, async execute(_args, context) {
+      await permission(context, "sandboxStatus", sessions.worktree);
+      return sessions.run(context.sessionID, async (sandbox) => JSON.stringify({
+        name: sandbox.name,
+        status: sandbox.status,
+        region: sandbox.region,
+        failoverRegions: sandbox.failoverRegions,
+        vcpus: sandbox.vcpus,
+        memory: sandbox.memory,
+        image: sandbox.image,
+        persistent: sandbox.persistent,
+        timeout: sandbox.timeout,
+        expiresAt: sandbox.expiresAt?.toISOString() ?? null,
+        createdAt: sandbox.createdAt.toISOString(),
+        updatedAt: sandbox.updatedAt.toISOString(),
+        statusUpdatedAt: sandbox.statusUpdatedAt?.toISOString() ?? null,
+        cwd: sandbox.cwd,
+        tags: sandbox.tags ?? {},
+        networkPolicy: sandbox.networkPolicy ?? null,
+        currentSnapshotId: sandbox.currentSnapshotId ?? null,
+        totalActiveCpuDurationMs: sandbox.totalActiveCpuDurationMs,
+        totalDurationMs: sandbox.totalDurationMs,
+        totalEgressBytes: sandbox.totalEgressBytes,
+        totalIngressBytes: sandbox.totalIngressBytes,
+        activeCpuUsageMs: sandbox.activeCpuUsageMs,
+        networkTransfer: sandbox.networkTransfer,
+      }, null, 2), context.abort);
+    } }),
+    sandboxExtend: tool({ description: "Extend this session's Vercel Sandbox timeout before it expires. Refused once the Sandbox is stopping or stopped.", args: { duration: schema.number().int().min(60_000).max(900_000) }, async execute(args, context) {
+      if (!Number.isInteger(args.duration) || args.duration < 60_000 || args.duration > 900_000) throw new Error("Duration must be an integer between 60,000 and 900,000 milliseconds.");
+      await permission(context, "sandboxExtend", sessions.worktree);
+      return sessions.run(context.sessionID, async (sandbox) => {
+        if (sandbox.status !== "running") throw new Error(`Cannot extend a Sandbox that is ${sandbox.status}. Wait for it to become running or stop it.`);
+        await sandbox.extendTimeout(args.duration);
+        return `Extended ${sandbox.name} by ${args.duration}ms; expires at ${sandbox.expiresAt?.toISOString() ?? "unknown"}`;
+      }, context.abort);
+    } }),
   };
 }

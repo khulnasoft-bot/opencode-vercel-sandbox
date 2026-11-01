@@ -73,7 +73,7 @@ Exit normally so pending sync can finish. Forced termination can leave a lock re
 
 ## Preview boundaries
 
-- Supported tools: `bash`, `read`, `write`, `edit`, `multiedit`, `ls`, `glob`, `grep`, `gitSync`, `sandboxStop` and `getPreviewURL`. Previews require an explicit `previewPorts` entry and expose a public port.
+- Supported tools: `bash`, `read`, `write`, `edit`, `multiedit`, `ls`, `glob`, `grep`, `gitSync`, `sandboxStop`, `getPreviewURL`, `sandboxStatus` and `sandboxExtend`. Previews require an explicit `previewPorts` entry and expose a public port.
 - `apply_patch`, subagents, LSP, skills, code-mode, MCP and direct local shell are disabled. Use remote `bash` for editing when necessary. Additional user plugins are rejected.
 - This isolates supported tools, not the local OpenCode application. Local configuration, explicit attachments, custom command templates and Git metadata are outside the isolation guarantee. Choose the standalone terminal for the whole OpenCode process inside the VM.
 - Permission and cancellation checks apply. Shell calls are limited to two minutes and displayed output to 64,000 characters; Git bundles are capped at 64 MiB. Background file writers are not tracked. Stop them before syncing.

@@ -49,6 +49,96 @@ test("remote cancellation sends a termination signal", async () => {
   assert.equal(killed, true);
 });
 
+test("sandboxStatus reports sandbox metadata without starting compute", async () => {
+  const now = new Date("2026-11-01T00:00:00.000Z");
+  const sandbox = {
+    name: "oc-abc123",
+    status: "running",
+    region: "iad1",
+    failoverRegions: ["sfo1"],
+    vcpus: 2,
+    memory: 4096,
+    image: "vercel/sandbox/universal",
+    persistent: true,
+    timeout: 1_800_000,
+    expiresAt: new Date("2026-11-01T00:30:00.000Z"),
+    createdAt: now,
+    updatedAt: now,
+    statusUpdatedAt: now,
+    cwd: "/vercel/sandbox/project",
+    tags: { env: "test" },
+    networkPolicy: { allow: { "*": [] } },
+    currentSnapshotId: "snap-1",
+    totalActiveCpuDurationMs: 100,
+    totalDurationMs: 1000,
+    totalEgressBytes: 50,
+    totalIngressBytes: 10,
+    activeCpuUsageMs: 25,
+    networkTransfer: { ingress: 10, egress: 50 },
+    domain: () => "https://preview.vercel.run",
+  } as unknown as Sandbox;
+  const sessions = { worktree: "/tmp/project", options: { previewPorts: [] }, run: async (_id: string, action: (sandbox: Sandbox) => Promise<string>) => action(sandbox) } as unknown as Sessions;
+  const tools = createTools(sessions);
+  const context = { sessionID: "one", abort: new AbortController().signal, ask: async () => {} } as unknown as ToolContext;
+  const output = await tools.sandboxStatus.execute({}, context);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.name, "oc-abc123");
+  assert.equal(parsed.status, "running");
+  assert.equal(parsed.region, "iad1");
+  assert.deepEqual(parsed.failoverRegions, ["sfo1"]);
+  assert.equal(parsed.vcpus, 2);
+  assert.equal(parsed.memory, 4096);
+  assert.equal(parsed.image, "vercel/sandbox/universal");
+  assert.equal(parsed.persistent, true);
+  assert.equal(parsed.timeout, 1_800_000);
+  assert.equal(parsed.expiresAt, "2026-11-01T00:30:00.000Z");
+  assert.equal(parsed.createdAt, "2026-11-01T00:00:00.000Z");
+  assert.equal(parsed.cwd, "/vercel/sandbox/project");
+  assert.deepEqual(parsed.tags, { env: "test" });
+  assert.equal(parsed.currentSnapshotId, "snap-1");
+  assert.equal(parsed.totalActiveCpuDurationMs, 100);
+  assert.equal(parsed.networkTransfer.egress, 50);
+});
+
+test("sandboxStatus permission denial happens before allocation", async () => {
+  const sessions = { worktree: "/tmp/project", options: { previewPorts: [] }, run: async () => { throw new Error("should not allocate"); } } as unknown as Sessions;
+  const tools = createTools(sessions);
+  const context = { sessionID: "one", abort: new AbortController().signal, ask: async () => { throw new Error("permission denied"); } } as unknown as ToolContext;
+  await assert.rejects(tools.sandboxStatus.execute({}, context), /permission denied/);
+});
+
+test("sandboxExtend lengthens a running sandbox and refuses non-running states", async () => {
+  let extended = 0;
+  let duration = 0;
+  const sandbox = {
+    name: "oc-extend",
+    status: "running",
+    expiresAt: new Date("2026-11-01T01:00:00.000Z"),
+    extendTimeout: async (ms: number) => { extended++; duration = ms; },
+  } as unknown as Sandbox;
+  const sessions = { worktree: "/tmp/project", options: { previewPorts: [] }, run: async (_id: string, action: (sandbox: Sandbox) => Promise<string>) => action(sandbox) } as unknown as Sessions;
+  const tools = createTools(sessions);
+  const context = { sessionID: "one", abort: new AbortController().signal, ask: async () => {} } as unknown as ToolContext;
+  const output = await tools.sandboxExtend.execute({ duration: 120_000 }, context);
+  assert.equal(extended, 1);
+  assert.equal(duration, 120_000);
+  assert.match(output, /Extended oc-extend by 120000ms/);
+  assert.match(output, /2026-11-01T01:00:00.000Z/);
+
+  const stopped = { ...sandbox, status: "stopped", extendTimeout: async () => { throw new Error("should not extend"); } } as unknown as Sandbox;
+  const stoppedSessions = { worktree: "/tmp/project", options: { previewPorts: [] }, run: async (_id: string, action: (sandbox: Sandbox) => Promise<string>) => action(stopped) } as unknown as Sessions;
+  await assert.rejects(createTools(stoppedSessions).sandboxExtend.execute({ duration: 60_000 }, context), /stopped/);
+});
+
+test("sandboxExtend validates duration and denies permission before allocation", async () => {
+  const sessions = { worktree: "/tmp/project", options: { previewPorts: [] }, run: async () => { throw new Error("should not allocate"); } } as unknown as Sessions;
+  const tools = createTools(sessions);
+  const context = { sessionID: "one", abort: new AbortController().signal, ask: async () => { throw new Error("permission denied"); } } as unknown as ToolContext;
+  await assert.rejects(tools.sandboxExtend.execute({ duration: 1000 }, context), /duration/i);
+  await assert.rejects(tools.sandboxExtend.execute({ duration: 1_000_000 }, context), /duration/i);
+  await assert.rejects(tools.sandboxExtend.execute({ duration: 60_000 }, context), /permission denied/);
+});
+
 test("file worker reads, writes, applies exact edits and rejects ambiguous/binary edits", async () => {
   const root = await mkdtemp(join(tmpdir(), "oc-worker-test-"));
   const path = join(root, "file.txt");
